@@ -1,0 +1,400 @@
+import React, { useState, useEffect } from 'react';
+import { Upload, BarChart3, PieChart, TrendingUp, Filter, Download, Search, X } from 'lucide-react';
+import { BarChart, Bar, LineChart, Line, PieChart as RePieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import Papa from 'papaparse';
+
+export default function DataAnalysisDashboard() {
+  const [data, setData] = useState([]);
+  const [columns, setColumns] = useState([]);
+  const [selectedColumns, setSelectedColumns] = useState([]);
+  const [chartType, setChartType] = useState('bar');
+  const [filters, setFilters] = useState({});
+  const [searchTerm, setSearchTerm] = useState('');
+  const [aggregation, setAggregation] = useState('count');
+  const [groupBy, setGroupBy] = useState('');
+  const [stats, setStats] = useState(null);
+
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target.result;
+      
+      if (file.name.endsWith('.json')) {
+        try {
+          const jsonData = JSON.parse(text);
+          const dataArray = Array.isArray(jsonData) ? jsonData : [jsonData];
+          processData(dataArray);
+        } catch (error) {
+          alert('Error parsing JSON file');
+        }
+      } else {
+        Papa.parse(text, {
+          header: true,
+          dynamicTyping: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            processData(results.data);
+          },
+          error: () => {
+            alert('Error parsing CSV file');
+          }
+        });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const processData = (rawData) => {
+    if (rawData.length === 0) return;
+    
+    const cols = Object.keys(rawData[0]);
+    setColumns(cols);
+    setSelectedColumns(cols.slice(0, 2));
+    setGroupBy(cols[0]);
+    setData(rawData);
+    calculateStats(rawData, cols);
+  };
+
+  const calculateStats = (rawData, cols) => {
+    const numericCols = cols.filter(col => 
+      rawData.some(row => typeof row[col] === 'number')
+    );
+
+    const statsData = {};
+    numericCols.forEach(col => {
+      const values = rawData.map(row => row[col]).filter(v => typeof v === 'number');
+      if (values.length > 0) {
+        statsData[col] = {
+          count: values.length,
+          sum: values.reduce((a, b) => a + b, 0),
+          avg: values.reduce((a, b) => a + b, 0) / values.length,
+          min: Math.min(...values),
+          max: Math.max(...values)
+        };
+      }
+    });
+
+    setStats(statsData);
+  };
+
+  const getFilteredData = () => {
+    let filtered = data.filter(row => {
+      const matchesSearch = searchTerm === '' || 
+        Object.values(row).some(val => 
+          String(val).toLowerCase().includes(searchTerm.toLowerCase())
+        );
+      
+      const matchesFilters = Object.entries(filters).every(([col, filterVal]) => {
+        if (!filterVal) return true;
+        return String(row[col]).toLowerCase().includes(filterVal.toLowerCase());
+      });
+
+      return matchesSearch && matchesFilters;
+    });
+
+    return filtered;
+  };
+
+  const getChartData = () => {
+    const filtered = getFilteredData();
+    if (!groupBy || filtered.length === 0) return [];
+
+    const grouped = {};
+    
+    filtered.forEach(row => {
+      const key = row[groupBy] || 'Unknown';
+      if (!grouped[key]) {
+        grouped[key] = { name: String(key), count: 0, values: [] };
+      }
+      grouped[key].count++;
+      
+      selectedColumns.forEach(col => {
+        if (col !== groupBy && typeof row[col] === 'number') {
+          grouped[key].values.push(row[col]);
+        }
+      });
+    });
+
+    return Object.values(grouped).map(item => {
+      const result = { name: item.name, count: item.count };
+      
+      if (item.values.length > 0) {
+        switch(aggregation) {
+          case 'sum':
+            result.value = item.values.reduce((a, b) => a + b, 0);
+            break;
+          case 'avg':
+            result.value = item.values.reduce((a, b) => a + b, 0) / item.values.length;
+            break;
+          case 'min':
+            result.value = Math.min(...item.values);
+            break;
+          case 'max':
+            result.value = Math.max(...item.values);
+            break;
+          default:
+            result.value = item.count;
+        }
+      } else {
+        result.value = item.count;
+      }
+      
+      return result;
+    }).slice(0, 20);
+  };
+
+  const downloadFilteredData = () => {
+    const filtered = getFilteredData();
+    const csv = Papa.unparse(filtered);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'filtered_data.csv';
+    a.click();
+  };
+
+  const chartData = getChartData();
+  const filteredData = getFilteredData();
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-white mb-2">Data Analysis Dashboard</h1>
+          <p className="text-blue-200">Upload and analyze your Build AI data</p>
+        </div>
+
+        {/* Upload Section */}
+        {data.length === 0 ? (
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-12 border border-white/20">
+            <div className="text-center">
+              <Upload className="w-16 h-16 text-blue-300 mx-auto mb-4" />
+              <h2 className="text-2xl font-semibold text-white mb-2">Upload Your Data</h2>
+              <p className="text-blue-200 mb-6">Support for CSV and JSON files</p>
+              <label className="inline-block bg-blue-500 hover:bg-blue-600 text-white px-8 py-3 rounded-lg cursor-pointer transition-colors">
+                <input
+                  type="file"
+                  accept=".csv,.json"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                Choose File
+              </label>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Stats Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+                <div className="text-blue-200 text-sm mb-1">Total Records</div>
+                <div className="text-3xl font-bold text-white">{data.length}</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+                <div className="text-blue-200 text-sm mb-1">Filtered Records</div>
+                <div className="text-3xl font-bold text-white">{filteredData.length}</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+                <div className="text-blue-200 text-sm mb-1">Columns</div>
+                <div className="text-3xl font-bold text-white">{columns.length}</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+                <button
+                  onClick={() => {
+                    setData([]);
+                    setColumns([]);
+                    setFilters({});
+                    setSearchTerm('');
+                  }}
+                  className="w-full bg-red-500/20 hover:bg-red-500/30 text-red-200 px-4 py-2 rounded-lg transition-colors"
+                >
+                  Reset Data
+                </button>
+              </div>
+            </div>
+
+            {/* Controls */}
+            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-blue-200 mb-2">Search</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Search all fields..."
+                      className="w-full pl-10 pr-3 py-2 bg-white/5 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-blue-200 mb-2">Group By</label>
+                  <select
+                    value={groupBy}
+                    onChange={(e) => setGroupBy(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {columns.map(col => (
+                      <option key={col} value={col}>{col}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-blue-200 mb-2">Aggregation</label>
+                  <select
+                    value={aggregation}
+                    onChange={(e) => setAggregation(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="count">Count</option>
+                    <option value="sum">Sum</option>
+                    <option value="avg">Average</option>
+                    <option value="min">Minimum</option>
+                    <option value="max">Maximum</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-blue-200 mb-2">Chart Type</label>
+                  <select
+                    value={chartType}
+                    onChange={(e) => setChartType(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="bar">Bar Chart</option>
+                    <option value="line">Line Chart</option>
+                    <option value="pie">Pie Chart</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <button
+                  onClick={downloadFilteredData}
+                  className="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Filtered Data
+                </button>
+              </div>
+            </div>
+
+            {/* Chart */}
+            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+              <h3 className="text-xl font-semibold text-white mb-4">Visualization</h3>
+              <ResponsiveContainer width="100%" height={400}>
+                {chartType === 'bar' ? (
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                    <XAxis dataKey="name" stroke="#93c5fd" />
+                    <YAxis stroke="#93c5fd" />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                      labelStyle={{ color: '#93c5fd' }}
+                    />
+                    <Legend />
+                    <Bar dataKey="value" fill="#3b82f6" />
+                  </BarChart>
+                ) : chartType === 'line' ? (
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                    <XAxis dataKey="name" stroke="#93c5fd" />
+                    <YAxis stroke="#93c5fd" />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                      labelStyle={{ color: '#93c5fd' }}
+                    />
+                    <Legend />
+                    <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} />
+                  </LineChart>
+                ) : (
+                  <RePieChart>
+                    <Pie
+                      data={chartData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={(entry) => entry.name}
+                      outerRadius={150}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {chartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                      labelStyle={{ color: '#93c5fd' }}
+                    />
+                  </RePieChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+
+            {/* Statistics */}
+            {stats && Object.keys(stats).length > 0 && (
+              <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+                <h3 className="text-xl font-semibold text-white mb-4">Column Statistics</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {Object.entries(stats).map(([col, stat]) => (
+                    <div key={col} className="bg-white/5 rounded-lg p-4">
+                      <h4 className="font-semibold text-blue-200 mb-2">{col}</h4>
+                      <div className="space-y-1 text-sm text-gray-300">
+                        <div>Count: {stat.count}</div>
+                        <div>Sum: {stat.sum.toFixed(2)}</div>
+                        <div>Average: {stat.avg.toFixed(2)}</div>
+                        <div>Min: {stat.min.toFixed(2)}</div>
+                        <div>Max: {stat.max.toFixed(2)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Data Table */}
+            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+              <h3 className="text-xl font-semibold text-white mb-4">Data Preview (First 100 rows)</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="text-xs uppercase bg-white/5">
+                    <tr>
+                      {columns.map(col => (
+                        <th key={col} className="px-4 py-3 text-blue-200">
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredData.slice(0, 100).map((row, idx) => (
+                      <tr key={idx} className="border-b border-white/10 hover:bg-white/5">
+                        {columns.map(col => (
+                          <td key={col} className="px-4 py-3 text-gray-300">
+                            {String(row[col])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
